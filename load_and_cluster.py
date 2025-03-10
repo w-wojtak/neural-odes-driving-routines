@@ -5,9 +5,10 @@ import folium
 from folium.plugins import MarkerCluster
 import os
 
+
 # Load dataset
 data_dir = "Datasets"
-file_name = "DL_HMI_04.xlsx"  # Choose a dataset for one vehicle
+file_name = "DL_HMI_01.xlsx"  # Choose a dataset for one vehicle
 file_path = os.path.join(data_dir, file_name)
 
 df = pd.read_excel(file_path)
@@ -44,6 +45,14 @@ df['POI'] = cluster_labels
 num_pois = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
 print(f"Number of POIs detected: {num_pois}")
 
+# Save the processed dataframe (so we don't need to cluster again)
+processed_file_name = "DL_HMI_01_with_POI.csv"  
+processed_file_path = os.path.join(data_dir, processed_file_name)
+
+df.to_csv(processed_file_path, index=False)  # Save as CSV
+
+print(f"Processed data with POIs saved to: {processed_file_path}")
+
 # Create a map centered around the mean coordinates
 map_center = [df['Latitude'].mean(), df['Longitude'].mean()]
 poi_map = folium.Map(location=map_center, zoom_start=12)
@@ -70,3 +79,4 @@ poi_map.save("poi_map.html")
 
 # Display the first few rows of the dataframe with POI labels
 print(df.head())
+
