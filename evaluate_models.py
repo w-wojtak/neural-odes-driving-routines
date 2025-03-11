@@ -5,23 +5,19 @@ import numpy as np
 from sklearn.metrics import mean_squared_error, accuracy_score, roc_auc_score, f1_score
 from models import ODERNN_Time, ODERNN_Power, ODERNN_POI, ODERNN_Drivers  # Import model classes
 
-# Load the dataset
+# Load the test dataset
 df_test = pd.read_csv("Datasets/DL_HMI_01_with_POI.csv")
 
-# Preprocess test set (same way as training)
+# Preprocess test set
 df_test = df_test.sort_values(by="TimeDay").drop_duplicates(subset=["TimeDay"], keep="last")
 df_test = df_test.apply(pd.to_numeric, errors='coerce').fillna(0)
 
+# Extract dynamically the number of POI classes
 num_poi_classes = df_test["POI"].nunique()
-driver_labels = [f"Driver_{name}" for name in ["Homer", "Bart", "Lisa", "Marge"]]  # Ensure correct driver names
-num_driver_features = len(driver_labels)
 
-# Ensure multi-hot encoded drivers exist in test set
-if "Drivers_MultiHot" in df_test.columns:
-    drivers_encoded_test = np.vstack(df_test["Drivers_MultiHot"].values)
-    df_test_drivers = pd.DataFrame(drivers_encoded_test, columns=driver_labels)
-    df_test = pd.concat([df_test, df_test_drivers], axis=1)
-    df_test.drop(columns=["Drivers_MultiHot"], inplace=True)  # Drop temp column
+# Extract driver labels dynamically (assuming they are between Temperature and POI)
+driver_labels = df_test.columns[df_test.columns.get_loc("Temperature") + 1 : df_test.columns.get_loc("POI")].tolist()
+num_driver_features = len(driver_labels)
 
 # Prepare test tensors
 X_test_time = torch.tensor(df_test.drop(columns=["TimeDay"]).values, dtype=torch.float32)
@@ -33,14 +29,8 @@ t_test_power = torch.tensor(df_test["TimeDay"].values, dtype=torch.float32)
 X_test_poi = torch.tensor(df_test.drop(columns=["POI"]).values, dtype=torch.float32)
 t_test_poi = torch.tensor(df_test["TimeDay"].values, dtype=torch.float32)
 
-# Drop only existing driver label columns
-X_test_drivers = torch.tensor(
-    df_test.drop(columns=[col for col in driver_labels if col in df_test.columns]).values, dtype=torch.float32
-)
+X_test_drivers = torch.tensor(df_test[driver_labels].values, dtype=torch.float32)
 t_test_drivers = torch.tensor(df_test["TimeDay"].values, dtype=torch.float32)
-
-print(f"Evaluation input size for Time model: {X_test_time.shape[1]}")
-
 
 # Initialize models
 model_time = ODERNN_Time(X_test_time.shape[1], 16)
@@ -79,7 +69,7 @@ y_test_pred_poi_labels = torch.argmax(y_test_pred_poi, dim=1)
 y_test_pred_drivers_binary = (torch.sigmoid(y_test_pred_drivers) > 0.5).float()
 
 # Compute Evaluation Metrics
-rmse_time = mean_squared_error(target_time_test[:-1], y_test_pred_time.numpy(), squared=False)
+rmse_time = mean_squared_error(target_time_test[:-1], y_test_pred_time.numpy()) ** 0.5  # Manual sqrt for RMSE
 accuracy_power = accuracy_score(target_power_test[:-1], y_test_pred_power_binary.numpy())
 auc_power = roc_auc_score(target_power_test[:-1], y_test_pred_power.numpy())
 accuracy_poi = accuracy_score(target_poi_test[:-1], y_test_pred_poi_labels.numpy())
