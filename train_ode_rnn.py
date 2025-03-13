@@ -99,8 +99,25 @@ num_poi_classes = df["POI"].nunique()
 driver_labels = df.columns[df.columns.get_loc("Temperature") + 1 : df.columns.get_loc("POI")].tolist()
 num_driver_features = len(driver_labels)
 
-# Train-test split
-df_train, df_test = train_test_split(df, test_size=0.2, shuffle=False)
+# # Train-test split
+# df_train, df_test = train_test_split(df, test_size=0.2, shuffle=False)
+
+# Get unique days in sorted order
+unique_days = df["DayNum"].unique()
+num_train_days = int(len(unique_days) * 0.8)  # 80% for training
+
+# Select days for training and testing
+train_days = unique_days[:num_train_days]
+test_days = unique_days[num_train_days:]
+
+# Filter dataset based on the selected days
+df_train = df[df["DayNum"].isin(train_days)].copy()
+df_test = df[df["DayNum"].isin(test_days)].copy()
+
+print(f"Training days: {train_days[:5]} ... {train_days[-5:]}")
+print(f"Testing days: {test_days[:5]} ... {test_days[-5:]}")
+print(f"Train size: {len(df_train)}, Test size: {len(df_test)}")
+
 
 # Normalize within a day
 df_train["TimeDay"] = df_train["TimeDay"] / (24 * 60)  
@@ -120,32 +137,49 @@ model_poi = ODERNN_POI(df_train.drop(columns=["POI"]).shape[1], hidden_dim, num_
 model_drivers = ODERNN_Drivers(len(driver_labels), hidden_dim, num_driver_features)
 
 # Optimizers
-optimizer_time = torch.optim.Adam(model_time.parameters(), lr=0.005)
+optimizer_time = torch.optim.Adam(model_time.parameters(), lr=0.0025)
 optimizer_power = torch.optim.Adam(model_power.parameters(), lr=0.01)
 optimizer_poi = torch.optim.Adam(model_poi.parameters(), lr=0.01)
 optimizer_drivers = torch.optim.Adam(model_drivers.parameters(), lr=0.01)
 
 # Training loop over days
+# Training loop over days, ensuring batches contain only one day's sequence
 epochs = 500
+batch_size = 1  # Ensuring each batch contains only one day
+
 for epoch in range(epochs):
-    optimizer_time.zero_grad()
-    all_loss_t = 0
+    total_loss_t = 0
+    
+    # Shuffle days before each epoch (optional, but could help generalization)
+    train_days = df_train["DayNum"].unique()
+    np.random.shuffle(train_days)
 
-    for day, df_day in df_train.groupby("DayNum"):
-        X_train_time = torch.tensor(df_day.drop(columns=["TimeDay"]).values, dtype=torch.float32)
-        t_train_time = torch.tensor(df_day["TimeDay"].values, dtype=torch.float32)
+    for i in range(0, len(train_days), batch_size):
+        batch_days = train_days[i : i + batch_size]
+        df_batch = df_train[df_train["DayNum"].isin(batch_days)]
 
+        # Prepare inputs
+        X_train_time = torch.tensor(df_batch.drop(columns=["TimeDay"]).values, dtype=torch.float32)
+        t_train_time = torch.tensor(df_batch["TimeDay"].values, dtype=torch.float32)
+
+        optimizer_time.zero_grad()
+
+        # Forward pass
         y_pred_time = model_time(X_train_time.unsqueeze(1), t_train_time).squeeze(1)
-        target_time = torch.tensor(df_day["TimeDay"].values, dtype=torch.float32)
 
+        # Targets
+        target_time = torch.tensor(df_batch["TimeDay"].values, dtype=torch.float32)
+
+        # Compute loss
         loss_t = F.mse_loss(y_pred_time.squeeze(-1), target_time[:-1])  
-        all_loss_t += loss_t
+        loss_t.backward()
+        optimizer_time.step()
 
-    all_loss_t.backward()  # Accumulate gradients across days
-    optimizer_time.step()
+        total_loss_t += loss_t.item()
 
     if epoch % 50 == 0:
-        print(f"Epoch {epoch}, Avg Loss Time: {all_loss_t.item() / len(df_train['DayNum'].unique()):.4f}")
+        print(f"Epoch {epoch}, Avg Loss Time: {total_loss_t/len(train_days):.4f}")
+
 
 
 # Save the models
