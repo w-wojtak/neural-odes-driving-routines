@@ -120,37 +120,33 @@ model_poi = ODERNN_POI(df_train.drop(columns=["POI"]).shape[1], hidden_dim, num_
 model_drivers = ODERNN_Drivers(len(driver_labels), hidden_dim, num_driver_features)
 
 # Optimizers
-optimizer_time = torch.optim.Adam(model_time.parameters(), lr=0.01)
+optimizer_time = torch.optim.Adam(model_time.parameters(), lr=0.005)
 optimizer_power = torch.optim.Adam(model_power.parameters(), lr=0.01)
 optimizer_poi = torch.optim.Adam(model_poi.parameters(), lr=0.01)
 optimizer_drivers = torch.optim.Adam(model_drivers.parameters(), lr=0.01)
 
 # Training loop over days
-epochs = 200
+epochs = 500
 for epoch in range(epochs):
-    total_loss_t, total_loss_p, total_loss_poi, total_loss_d = 0, 0, 0, 0
+    optimizer_time.zero_grad()
+    all_loss_t = 0
 
     for day, df_day in df_train.groupby("DayNum"):
         X_train_time = torch.tensor(df_day.drop(columns=["TimeDay"]).values, dtype=torch.float32)
         t_train_time = torch.tensor(df_day["TimeDay"].values, dtype=torch.float32)
 
-        optimizer_time.zero_grad()
-
-        # Forward pass
         y_pred_time = model_time(X_train_time.unsqueeze(1), t_train_time).squeeze(1)
-
-        # Targets
         target_time = torch.tensor(df_day["TimeDay"].values, dtype=torch.float32)
 
-        # Compute loss
         loss_t = F.mse_loss(y_pred_time.squeeze(-1), target_time[:-1])  
-        loss_t.backward()
-        optimizer_time.step()
+        all_loss_t += loss_t
 
-        total_loss_t += loss_t.item()
+    all_loss_t.backward()  # Accumulate gradients across days
+    optimizer_time.step()
 
     if epoch % 50 == 0:
-        print(f"Epoch {epoch}, Avg Loss Time: {total_loss_t/len(df_train['DayNum'].unique()):.4f}")
+        print(f"Epoch {epoch}, Avg Loss Time: {all_loss_t.item() / len(df_train['DayNum'].unique()):.4f}")
+
 
 # Save the models
 torch.save(model_time.state_dict(), "models/ODERNN_Time.pth")
