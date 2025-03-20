@@ -105,14 +105,14 @@ model_drivers = ODERNN_Drivers(X_train.shape[1], 16, len(driver_labels))
 
 # Optimizer Setup (Using a dictionary for simplicity)
 optimizers = {
-    'time': torch.optim.Adam(model_time.parameters(), lr=0.005),
+    'time': torch.optim.Adam(model_time.parameters(), lr=0.0015),
     'power': torch.optim.Adam(model_power.parameters(), lr=0.01),
     'poi': torch.optim.Adam(model_poi.parameters(), lr=0.01),
     'drivers': torch.optim.Adam(model_drivers.parameters(), lr=0.01)
 }
 
 # Training Loop
-epochs = 500
+epochs = 1000
 for epoch in range(epochs):
     # Reset gradients
     for optimizer in optimizers.values():
