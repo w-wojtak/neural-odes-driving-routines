@@ -1,7 +1,7 @@
 import torch
 import pandas as pd
 import torch.nn.functional as F
-from sklearn.metrics import mean_squared_error, accuracy_score
+from sklearn.metrics import mean_squared_error, accuracy_score, mean_absolute_error
 from sklearn.model_selection import train_test_split
 # from train_ode_rnn import preprocess_data
 
@@ -116,12 +116,14 @@ target_poi = df_test["POI"].values
 
 # Compute Evaluation Metrics
 mse_time = mean_squared_error(target_time[:-1], y_pred_time)
+mae_time = mean_absolute_error(target_time[:-1], y_pred_time)
 # mse_power = mean_squared_error(target_power[:-1], y_pred_power)
 accuracy_poi = accuracy_score(target_poi[:-1], y_pred_poi)
 # mse_drivers = mean_squared_error(target_drivers[:-1], y_pred_drivers)
 
 # Print Results
 print(f"Time Prediction MSE: {mse_time:.4f}")
+print(f"Time Prediction MAE: {mae_time:.4f}")
 # print(f"Power Prediction MSE: {mse_power:.4f}")
 print(f"POI Classification Accuracy: {accuracy_poi:.4f}")
 # print(f"Driver Features MSE: {mse_drivers:.4f}")
