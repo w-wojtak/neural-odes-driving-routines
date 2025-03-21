@@ -5,6 +5,7 @@ import torchdiffeq
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 import torch.nn.functional as F
+import random
 import numpy as np
 
 # Base ODE-RNN Model Class
@@ -70,8 +71,33 @@ class ODERNN_Drivers(BaseODERNN):
     def __init__(self, input_dim, hidden_dim, num_driver_features):
         super(ODERNN_Drivers, self).__init__(input_dim, hidden_dim, num_driver_features)
 
-# Data Preprocessing
-def preprocess_data(df, driver_labels):
+
+
+# Data Augmentation Functions
+def add_noise(data, noise_level=0.01):
+    noise = noise_level * torch.randn_like(data)
+    return data + noise
+
+def time_warp(data, alpha=0.1):
+    stretched_time = np.arange(data.shape[0]) * (1 + alpha * np.random.randn())
+    stretched_time = np.clip(stretched_time, 0, data.shape[0] - 1)
+    return torch.tensor(np.interp(stretched_time, np.arange(data.shape[0]), data.numpy()), dtype=torch.float32)
+
+def time_shift(data, shift_range=10):
+    shift = np.random.randint(-shift_range, shift_range)
+    return torch.roll(data, shifts=shift, dims=0)
+
+def scale_magnitude(data, scale_range=(0.8, 1.2)):
+    scale = torch.tensor(np.random.uniform(scale_range[0], scale_range[1]), dtype=torch.float32)
+    return data * scale
+
+def augment_data(X):
+    augmentations = [add_noise, time_shift, scale_magnitude]
+    aug_func = random.choice(augmentations)
+    return aug_func(X)
+
+# Data Preprocessing with Augmentation
+def preprocess_data(df, driver_labels, augment=True):
     df["TimeDay"] = df["TimeDay"] / (24 * 60)  # Normalize within a day
     df["TimeDay"] += df.groupby("DayNum").cumcount() * 1e-4  # Small offset within each day to break ties
     df = df.sort_values(by=["DayNum", "TimeDay"]).reset_index(drop=True)
@@ -81,21 +107,58 @@ def preprocess_data(df, driver_labels):
     X = torch.tensor(df.drop(columns=["TimeDay", "Power", "POI"]).values, dtype=torch.float32)
     t = torch.tensor(df["TimeDay"].values, dtype=torch.float32)
     
-    return X, t
+    t_original = torch.tensor(df["TimeDay"].values, dtype=torch.float32)  # Original time labels
+
+    if augment:
+        X_aug = augment_data(X)  # Apply augmentation to X
+        t_aug = augment_data(t_original.view(-1, 1)).squeeze()
+        X = torch.cat([X, X_aug], dim=0)  # Double the data
+        t = torch.cat([t_original, t_aug], dim=0)  # Ensure time labels are doubled
+    else:
+        X = X  # No augmentation for X
+        t = t_original
+
+    # print("X shape:", X.shape)
+    # print("t shape:", t.shape)
+
+    return X, t  # Only return X and t (t serves as both input and target)
+
+
+
+
 
 # Load Data
 data_path = "Datasets/DL_HMI_01_with_POI.csv"
 df = pd.read_csv(data_path)
+print("Original Data Shape:", df.shape)
 
-# Dynamically extracting driver labels (assuming they are between Temperature and POI)
+# Extract driver labels dynamically
 driver_labels = df.columns[df.columns.get_loc("Temperature") + 1 : df.columns.get_loc("POI")].tolist()
 
 # Train-Test Split
 df_train, df_test = train_test_split(df, test_size=0.2, shuffle=False)
+print("Train Data Shape:", df_train.shape)
+print("Test Data Shape:", df_test.shape)
 
-# Preprocess training and testing data
-X_train, t_train = preprocess_data(df_train, driver_labels)
-X_test, t_test = preprocess_data(df_test, driver_labels)
+# Preprocess training and testing data (augment training data only)
+X_train, t_train = preprocess_data(df_train, driver_labels, augment=True)
+X_test, t_test = preprocess_data(df_test, driver_labels, augment=False)
+
+augmented_df = pd.concat([df_train, df_train])  # Duplicate the training data
+augmented_df = augmented_df.reset_index(drop=True)  # Reset the index after concatenation
+
+print("Preprocessed X_train Shape:", X_train.shape)
+print("Preprocessed t_train Shape:", t_train.shape)
+
+# Set target_time to be the augmented t_train
+# target_time = t_train
+
+
+# print("X_train shape:", X_train.shape)
+# print("t_train shape:", t_train.shape)
+# print("target_time shape:", target_time.shape)
+
+
 
 # Model Initialization
 model_time = ODERNN_Time(X_train.shape[1], 16)
@@ -118,17 +181,21 @@ for epoch in range(epochs):
     for optimizer in optimizers.values():
         optimizer.zero_grad()
 
+    # Reshape X_train and t_train for batch processing
+    # X_train_seq = X_train.unsqueeze(0).repeat(len(t_train), 1, 1)  # Shape: (seq_len, batch_size, input_dim)
+    # t_train_seq = t_train.unsqueeze(0).repeat(len(t_train), 1)  # Shape: (seq_len, batch_size)
+
     # Predictions
     y_pred_time = model_time(X_train.unsqueeze(1), t_train).squeeze(1)
     y_pred_time = y_pred_time.mean(dim=-1)  # Take the mean across the 16 dimension
     y_pred_poi = model_poi(X_train.unsqueeze(1), t_train).squeeze(1)
 
     # Targets
-    target_time = torch.tensor(df_train["TimeDay"].values, dtype=torch.float32)
-    target_poi = torch.tensor(df_train["POI"].values, dtype=torch.long)
+    target_time = torch.tensor(augmented_df["TimeDay"].values, dtype=torch.float32)
+    target_poi = torch.tensor(augmented_df["POI"].values, dtype=torch.long)
 
     # Losses
-    loss_t = F.mse_loss(y_pred_time, target_time[:-1])   # Time prediction loss
+    loss_t = F.mse_loss(y_pred_time, target_time[:-1])  # Time prediction loss
     loss_poi = F.cross_entropy(y_pred_poi, target_poi[:-1])  # POI classification loss
 
     # Backpropagation
@@ -141,8 +208,6 @@ for epoch in range(epochs):
 
     if epoch % 50 == 0:  # Print loss every 50 epochs
         print(f"Epoch [{epoch}/{epochs}], Loss: {total_loss.item():.4f}")
-
-
 
 
 
