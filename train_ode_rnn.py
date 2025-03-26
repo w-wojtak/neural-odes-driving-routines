@@ -168,7 +168,8 @@ model_drivers = ODERNN_Drivers(X_train.shape[1], 16, len(driver_labels))
 
 # Optimizer Setup (Using a dictionary for simplicity)
 optimizers = {
-    'time': torch.optim.Adam(model_time.parameters(), lr=0.0015),
+    # 'time': torch.optim.Adam(model_time.parameters(), lr=0.0015),
+    'time': torch.optim.AdamW(model_time.parameters(), lr=0.0015, weight_decay=1e-5),
     'power': torch.optim.Adam(model_power.parameters(), lr=0.01),
     'poi': torch.optim.Adam(model_poi.parameters(), lr=0.01),
     'drivers': torch.optim.Adam(model_drivers.parameters(), lr=0.01)
@@ -188,18 +189,19 @@ for epoch in range(epochs):
     # Predictions
     y_pred_time = model_time(X_train.unsqueeze(1), t_train).squeeze(1)
     y_pred_time = y_pred_time.mean(dim=-1)  # Take the mean across the 16 dimension
-    y_pred_poi = model_poi(X_train.unsqueeze(1), t_train).squeeze(1)
+    # y_pred_poi = model_poi(X_train.unsqueeze(1), t_train).squeeze(1)
 
     # Targets
     target_time = torch.tensor(augmented_df["TimeDay"].values, dtype=torch.float32)
-    target_poi = torch.tensor(augmented_df["POI"].values, dtype=torch.long)
+    # target_poi = torch.tensor(augmented_df["POI"].values, dtype=torch.long)
 
     # Losses
     loss_t = F.mse_loss(y_pred_time, target_time[:-1])  # Time prediction loss
-    loss_poi = F.cross_entropy(y_pred_poi, target_poi[:-1])  # POI classification loss
+    # loss_poi = F.cross_entropy(y_pred_poi, target_poi[:-1])  # POI classification loss
 
     # Backpropagation
-    total_loss = loss_t + loss_poi  # Total loss (you can add more losses as necessary)
+    # total_loss = loss_t + loss_poi  # Total loss (you can add more losses as necessary)
+    total_loss = loss_t
     total_loss.backward()
 
     # Update weights
