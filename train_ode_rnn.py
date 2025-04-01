@@ -7,6 +7,8 @@ from sklearn.model_selection import train_test_split
 import torch.nn.functional as F
 import random
 import numpy as np
+import matplotlib.pyplot as plt
+
 
 # Base ODE-RNN Model Class
 class BaseODERNN(nn.Module):
@@ -175,8 +177,12 @@ optimizers = {
     'drivers': torch.optim.Adam(model_drivers.parameters(), lr=0.01)
 }
 
+
+# Store loss history
+loss_history = []
+
 # Training Loop
-epochs = 1000
+epochs = 2000
 for epoch in range(epochs):
     # Reset gradients
     for optimizer in optimizers.values():
@@ -208,10 +214,21 @@ for epoch in range(epochs):
     for optimizer in optimizers.values():
         optimizer.step()
 
+    # Store loss
+    loss_history.append(loss_t.item())
+
     if epoch % 50 == 0:  # Print loss every 50 epochs
         print(f"Epoch [{epoch}/{epochs}], Loss: {total_loss.item():.4f}")
 
 
+
+# Plot Loss Curve
+plt.plot(loss_history, label="Training Loss")
+plt.xlabel("Epochs")
+plt.ylabel("Loss")
+plt.title("Loss Curve Over Training")
+plt.legend()
+plt.show()
 
 # Save the models
 torch.save(model_time.state_dict(), "models/ODERNN_Time.pth")
