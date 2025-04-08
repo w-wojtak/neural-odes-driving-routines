@@ -137,13 +137,17 @@ print("Original Data Shape:", df.shape)
 # Extract driver labels dynamically
 driver_labels = df.columns[df.columns.get_loc("Temperature") + 1 : df.columns.get_loc("POI")].tolist()
 
-# Train-Test Split
+
+# Train-Validation-Test Split
 df_train, df_test = train_test_split(df, test_size=0.2, shuffle=False)
+df_train, df_val = train_test_split(df_train, test_size=0.1, shuffle=False)  # 10% for validation
 print("Train Data Shape:", df_train.shape)
+print("Validation Data Shape:", df_val.shape)
 print("Test Data Shape:", df_test.shape)
 
-# Preprocess training and testing data (augment training data only)
+# Preprocess training, validation, and testing data (augment training data only)
 X_train, t_train = preprocess_data(df_train, driver_labels, augment=True)
+X_val, t_val = preprocess_data(df_val, driver_labels, augment=False)  # No augmentation for validation
 X_test, t_test = preprocess_data(df_test, driver_labels, augment=False)
 
 augmented_df = pd.concat([df_train, df_train])  # Duplicate the training data
@@ -151,6 +155,23 @@ augmented_df = augmented_df.reset_index(drop=True)  # Reset the index after conc
 
 print("Preprocessed X_train Shape:", X_train.shape)
 print("Preprocessed t_train Shape:", t_train.shape)
+print("Preprocessed X_val Shape:", X_val.shape)
+print("Preprocessed t_val Shape:", t_val.shape)
+
+# # Train-Test Split
+# df_train, df_test = train_test_split(df, test_size=0.2, shuffle=False)
+# print("Train Data Shape:", df_train.shape)
+# print("Test Data Shape:", df_test.shape)
+
+# # Preprocess training and testing data (augment training data only)
+# X_train, t_train = preprocess_data(df_train, driver_labels, augment=True)
+# X_test, t_test = preprocess_data(df_test, driver_labels, augment=False)
+
+# augmented_df = pd.concat([df_train, df_train])  # Duplicate the training data
+# augmented_df = augmented_df.reset_index(drop=True)  # Reset the index after concatenation
+
+# print("Preprocessed X_train Shape:", X_train.shape)
+# print("Preprocessed t_train Shape:", t_train.shape)
 
 # Set target_time to be the augmented t_train
 # target_time = t_train
@@ -182,7 +203,7 @@ optimizers = {
 loss_history = []
 
 # Training Loop
-epochs = 2000
+epochs = 1000
 for epoch in range(epochs):
     # Reset gradients
     for optimizer in optimizers.values():
