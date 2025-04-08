@@ -189,18 +189,17 @@ model_power = ODERNN_Power(X_train.shape[1], 16)
 model_poi = ODERNN_POI(X_train.shape[1], 16, df["POI"].nunique())
 model_drivers = ODERNN_Drivers(X_train.shape[1], 16, len(driver_labels))
 
-# Optimizer Setup (Using a dictionary for simplicity)
+# Optimizer Setup
 optimizers = {
-    # 'time': torch.optim.Adam(model_time.parameters(), lr=0.0015),
     'time': torch.optim.AdamW(model_time.parameters(), lr=0.0015, weight_decay=1e-5),
     'power': torch.optim.Adam(model_power.parameters(), lr=0.01),
     'poi': torch.optim.Adam(model_poi.parameters(), lr=0.01),
     'drivers': torch.optim.Adam(model_drivers.parameters(), lr=0.01)
 }
 
-
 # Store loss history
-loss_history = []
+train_loss_history = []
+val_loss_history = []
 
 # Training Loop
 epochs = 1000
@@ -209,37 +208,53 @@ for epoch in range(epochs):
     for optimizer in optimizers.values():
         optimizer.zero_grad()
 
-    # Reshape X_train and t_train for batch processing
-    # X_train_seq = X_train.unsqueeze(0).repeat(len(t_train), 1, 1)  # Shape: (seq_len, batch_size, input_dim)
-    # t_train_seq = t_train.unsqueeze(0).repeat(len(t_train), 1)  # Shape: (seq_len, batch_size)
-
-    # Predictions
+    # Train step
     y_pred_time = model_time(X_train.unsqueeze(1), t_train).squeeze(1)
-    y_pred_time = y_pred_time.mean(dim=-1)  # Take the mean across the 16 dimension
-    # y_pred_poi = model_poi(X_train.unsqueeze(1), t_train).squeeze(1)
+    y_pred_time = y_pred_time.mean(dim=-1)  # Take the mean across the hidden dim
 
-    # Targets
     target_time = torch.tensor(augmented_df["TimeDay"].values, dtype=torch.float32)
-    # target_poi = torch.tensor(augmented_df["POI"].values, dtype=torch.long)
-
-    # Losses
     loss_t = F.mse_loss(y_pred_time, target_time[:-1])  # Time prediction loss
-    # loss_poi = F.cross_entropy(y_pred_poi, target_poi[:-1])  # POI classification loss
 
     # Backpropagation
-    # total_loss = loss_t + loss_poi  # Total loss (you can add more losses as necessary)
-    total_loss = loss_t
-    total_loss.backward()
-
-    # Update weights
+    loss_t.backward()
     for optimizer in optimizers.values():
         optimizer.step()
 
-    # Store loss
-    loss_history.append(loss_t.item())
+    # Store training loss
+    train_loss_history.append(loss_t.item())
 
-    if epoch % 50 == 0:  # Print loss every 50 epochs
-        print(f"Epoch [{epoch}/{epochs}], Loss: {total_loss.item():.4f}")
+    # Validation step
+    with torch.no_grad():
+        model_time.eval()  # Switch to evaluation mode
+        y_pred_time_val = model_time(X_val.unsqueeze(1), t_val).squeeze(1)
+        y_pred_time_val = y_pred_time_val.mean(dim=-1)  # Take the mean across the hidden dim
+
+        # Ensure the prediction and target sizes match
+        min_len = min(len(y_pred_time_val), len(t_val))  # Take the minimum length of both
+        y_pred_time_val = y_pred_time_val[:min_len]
+        t_val = t_val[:min_len]
+
+        print("Predicted Shape:", y_pred_time_val.shape)
+        print("Target Shape:", t_val.shape)
+
+
+        # Compute validation loss
+        loss_t_val = F.mse_loss(y_pred_time_val, t_val)
+        val_loss_history.append(loss_t_val.item())
+
+    
+    # Print the loss at every 50th epoch
+    if epoch % 50 == 0:
+        print(f"Epoch [{epoch}/{epochs}], Train Loss: {loss_t.item():.4f}, Val Loss: {loss_t_val.item():.4f}")
+
+# Plot Training and Validation Loss
+plt.plot(train_loss_history, label="Training Loss")
+plt.plot(val_loss_history, label="Validation Loss")
+plt.xlabel("Epochs")
+plt.ylabel("Loss")
+plt.title("Loss Curve Over Training and Validation")
+plt.legend()
+plt.show()
 
 
 
