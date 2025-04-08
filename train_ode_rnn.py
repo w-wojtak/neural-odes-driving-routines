@@ -23,14 +23,41 @@ class BaseODERNN(nn.Module):
     def forward(self, x, t):
         h = torch.zeros(x.size(1), self.hidden_dim).to(x.device)  # Ensure device consistency
         outputs = []
+        
+        # Iterate over the time steps
         for i in range(len(t) - 1):
+            # Solve the ODE step
             h = self.ode_solver(self.ode_func, h, torch.tensor([t[i], t[i+1]], device=x.device))[1]
+            
+            # Pass the hidden state through the RNN
             h = self.rnn(x[i], h)
+            
+            # Apply fully connected layer if exists
             if self.fc:
-                outputs.append(self.fc(h))
+                output = self.fc(h)
             else:
-                outputs.append(h)
-        return torch.stack(outputs)
+                output = h
+            
+            # Check if the output is valid (non-empty tensor)
+            if output is not None and output.nelement() > 0:
+                outputs.append(output)
+            else:
+                print(f"Warning: Empty or invalid output at time step {i}. Output shape: {output.shape if output is not None else 'None'}")
+        
+        # Ensure outputs list is not empty before stacking
+        if len(outputs) == 0:
+            print("Error: No valid outputs were generated.")
+            return None  # Or handle the error accordingly
+        
+        # Check for None elements in the outputs list
+        if any(output is None for output in outputs):
+            print("Error: Found None in the outputs list.")
+            return None  # Or handle the error accordingly
+        
+        # Apply sigmoid and return stacked outputs
+        return torch.stack([torch.sigmoid(output) for output in outputs])
+
+
 
 # Define ODE Function
 class ODEFunc(nn.Module):
@@ -134,24 +161,38 @@ data_path = "Datasets/DL_HMI_01_with_POI.csv"
 df = pd.read_csv(data_path)
 print("Original Data Shape:", df.shape)
 
+weeks = df["WeekNum"].unique()
+num_weeks = len(weeks)
+print("Weeks:", num_weeks)  # Last row
+
 # Extract driver labels dynamically
 driver_labels = df.columns[df.columns.get_loc("Temperature") + 1 : df.columns.get_loc("POI")].tolist()
 
+# Split weeks into train, validation, and test weeks
+train_weeks = weeks[:int(0.8 * num_weeks)]
+val_weeks = weeks[int(0.8 * num_weeks): int(0.9 * num_weeks)]
+test_weeks = weeks[int(0.9 * num_weeks):]
 
-# Train-Validation-Test Split
-df_train, df_test = train_test_split(df, test_size=0.2, shuffle=False)
-df_train, df_val = train_test_split(df_train, test_size=0.1, shuffle=False)  # 10% for validation
-print("Train Data Shape:", df_train.shape)
-print("Validation Data Shape:", df_val.shape)
-print("Test Data Shape:", df_test.shape)
+# Split data by weeks
+train_df = df[df["WeekNum"].isin(train_weeks)]
+val_df = df[df["WeekNum"].isin(val_weeks)]
+test_df = df[df["WeekNum"].isin(test_weeks)]
+
+# Display shapes of the split data
+print("Train Data Shape:", train_df.shape)
+print("Validation Data Shape:", val_df.shape)
+print("Test Data Shape:", test_df.shape)
+
 
 # Preprocess training, validation, and testing data (augment training data only)
-X_train, t_train = preprocess_data(df_train, driver_labels, augment=True)
-X_val, t_val = preprocess_data(df_val, driver_labels, augment=False)  # No augmentation for validation
-X_test, t_test = preprocess_data(df_test, driver_labels, augment=False)
+X_train, t_train = preprocess_data(train_df, driver_labels, augment=True)
+X_val, t_val = preprocess_data(val_df, driver_labels, augment=False)  # No augmentation for validation
+X_test, t_test = preprocess_data(test_df, driver_labels, augment=False)
 
-augmented_df = pd.concat([df_train, df_train])  # Duplicate the training data
+# Example of augmenting the training data by duplicating it
+augmented_df = pd.concat([train_df, train_df])  # Duplicate the training data
 augmented_df = augmented_df.reset_index(drop=True)  # Reset the index after concatenation
+
 
 print("Preprocessed X_train Shape:", X_train.shape)
 print("Preprocessed t_train Shape:", t_train.shape)
@@ -201,51 +242,66 @@ optimizers = {
 train_loss_history = []
 val_loss_history = []
 
+
 # Training Loop
 epochs = 1000
-for epoch in range(epochs):
-    # Reset gradients
-    for optimizer in optimizers.values():
-        optimizer.zero_grad()
+train_loss_history = []
+val_loss_history = []
 
-    # Train step
-    y_pred_time = model_time(X_train.unsqueeze(1), t_train).squeeze(1)
-    y_pred_time = y_pred_time.mean(dim=-1)  # Take the mean across the hidden dim
+try:
+    for epoch in range(epochs):
+        # Reset gradients
+        for optimizer in optimizers.values():
+            optimizer.zero_grad()
 
-    target_time = torch.tensor(augmented_df["TimeDay"].values, dtype=torch.float32)
-    loss_t = F.mse_loss(y_pred_time, target_time[:-1])  # Time prediction loss
+        # Train step
+        y_pred_time = model_time(X_train.unsqueeze(1), t_train).squeeze(1)
+        y_pred_time = y_pred_time.mean(dim=-1)  # Take the mean across the hidden dim
 
-    # Backpropagation
-    loss_t.backward()
-    for optimizer in optimizers.values():
-        optimizer.step()
+        target_time = torch.tensor(augmented_df["TimeDay"].values, dtype=torch.float32)
+        loss_t = F.mse_loss(y_pred_time, target_time[:-1])  # Time prediction loss
 
-    # Store training loss
-    train_loss_history.append(loss_t.item())
+        # Backpropagation
+        loss_t.backward()
+        for optimizer in optimizers.values():
+            optimizer.step()
 
-    # Validation step
-    with torch.no_grad():
-        model_time.eval()  # Switch to evaluation mode
-        y_pred_time_val = model_time(X_val.unsqueeze(1), t_val).squeeze(1)
-        y_pred_time_val = y_pred_time_val.mean(dim=-1)  # Take the mean across the hidden dim
+        # Store training loss
+        train_loss_history.append(loss_t.item())
 
-        # Ensure the prediction and target sizes match
-        min_len = min(len(y_pred_time_val), len(t_val))  # Take the minimum length of both
-        y_pred_time_val = y_pred_time_val[:min_len]
-        t_val = t_val[:min_len]
+        # Validation step
+        with torch.no_grad():
+            model_time.eval()  # Switch to evaluation mode
+            y_pred_time_val = model_time(X_val.unsqueeze(1), t_val).squeeze(1)
+            y_pred_time_val = y_pred_time_val.mean(dim=-1)  # Take the mean across the hidden dim
 
-        print("Predicted Shape:", y_pred_time_val.shape)
-        print("Target Shape:", t_val.shape)
+            # Ensure the prediction and target sizes match
+            min_len = min(len(y_pred_time_val), len(t_val))  # Take the minimum length of both
+            y_pred_time_val = y_pred_time_val[:min_len]
+            t_val = t_val[:min_len]
 
+            # Compute validation loss
+            loss_t_val = F.mse_loss(y_pred_time_val, t_val)
+            val_loss_history.append(loss_t_val.item())
 
-        # Compute validation loss
-        loss_t_val = F.mse_loss(y_pred_time_val, t_val)
-        val_loss_history.append(loss_t_val.item())
+        # Print the loss at every 50th epoch
+        if epoch % 50 == 0:
+            print(f"Epoch [{epoch}/{epochs}], Train Loss: {loss_t.item():.4f}, Val Loss: {loss_t_val.item():.4f}")
 
-    
-    # Print the loss at every 50th epoch
-    if epoch % 50 == 0:
-        print(f"Epoch [{epoch}/{epochs}], Train Loss: {loss_t.item():.4f}, Val Loss: {loss_t_val.item():.4f}")
+except Exception as e:
+    print("Error detected:", e)
+
+    # Plot loss curves
+    plt.figure(figsize=(10, 5))
+    plt.plot(train_loss_history, label="Train Loss", marker="o")
+    plt.plot(val_loss_history, label="Validation Loss", marker="o")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Training and Validation Loss Progression")
+    plt.show()
+
+    raise  # Re-raise the exception so you still see the traceback
 
 # Plot Training and Validation Loss
 plt.plot(train_loss_history, label="Training Loss")
