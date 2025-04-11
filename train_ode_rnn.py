@@ -186,13 +186,13 @@ print("Test Data Shape:", test_df.shape)
 
 
 # Preprocess training, validation, and testing data (augment training data only)
-X_train, t_train = preprocess_data(train_df, driver_labels, augment=True)
+X_train, t_train = preprocess_data(train_df, driver_labels, augment=False)
 X_val, t_val = preprocess_data(val_df, driver_labels, augment=False)  # No augmentation for validation
 X_test, t_test = preprocess_data(test_df, driver_labels, augment=False)
 
 # Example of augmenting the training data by duplicating it
-augmented_df = pd.concat([train_df, train_df])  # Duplicate the training data
-augmented_df = augmented_df.reset_index(drop=True)  # Reset the index after concatenation
+# augmented_df = pd.concat([train_df, train_df])  # Duplicate the training data
+# augmented_df = augmented_df.reset_index(drop=True)  # Reset the index after concatenation
 
 
 print("Preprocessed X_train Shape:", X_train.shape)
@@ -233,7 +233,7 @@ model_drivers = ODERNN_Drivers(X_train.shape[1], 16, len(driver_labels))
 
 # Optimizer Setup
 optimizers = {
-    'time': torch.optim.AdamW(model_time.parameters(), lr=0.005, weight_decay=1e-5),
+    'time': torch.optim.AdamW(model_time.parameters(), lr=0.0005, weight_decay=1e-5),
     'power': torch.optim.Adam(model_power.parameters(), lr=0.01),
     'poi': torch.optim.Adam(model_poi.parameters(), lr=0.01),
     'drivers': torch.optim.Adam(model_drivers.parameters(), lr=0.01)
@@ -259,7 +259,7 @@ try:
         y_pred_time = model_time(X_train.unsqueeze(1), t_train).squeeze(1)
         y_pred_time = y_pred_time.mean(dim=-1)  # Take the mean across the hidden dim
 
-        target_time = torch.tensor(augmented_df["TimeDay"].values, dtype=torch.float32)
+        target_time = torch.tensor(train_df["TimeDay"].values, dtype=torch.float32)
         loss_t = F.mse_loss(y_pred_time, target_time[:-1])  # Time prediction loss
 
         # Backpropagation
