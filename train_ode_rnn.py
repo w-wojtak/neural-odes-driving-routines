@@ -122,7 +122,8 @@ def scale_magnitude(data, scale_range=(0.8, 1.2)):
 
 def augment_data(X):
     augmentations = [add_noise, time_shift, scale_magnitude]
-    aug_func = random.choice(augmentations)
+    # aug_func = random.choice(augmentations)
+    aug_func = add_noise
     return aug_func(X)
 
 # Data Preprocessing with Augmentation
@@ -232,7 +233,7 @@ model_drivers = ODERNN_Drivers(X_train.shape[1], 16, len(driver_labels))
 
 # Optimizer Setup
 optimizers = {
-    'time': torch.optim.AdamW(model_time.parameters(), lr=0.0015, weight_decay=1e-5),
+    'time': torch.optim.AdamW(model_time.parameters(), lr=0.005, weight_decay=1e-5),
     'power': torch.optim.Adam(model_power.parameters(), lr=0.01),
     'poi': torch.optim.Adam(model_poi.parameters(), lr=0.01),
     'drivers': torch.optim.Adam(model_drivers.parameters(), lr=0.01)
@@ -263,6 +264,10 @@ try:
 
         # Backpropagation
         loss_t.backward()
+
+        # Gradient Clipping: clip gradients to avoid exploding gradients
+        torch.nn.utils.clip_grad_norm_(model_time.parameters(), max_norm=1.0)
+
         for optimizer in optimizers.values():
             optimizer.step()
 
@@ -314,13 +319,13 @@ plt.show()
 
 
 
-# Plot Loss Curve
-plt.plot(loss_history, label="Training Loss")
-plt.xlabel("Epochs")
-plt.ylabel("Loss")
-plt.title("Loss Curve Over Training")
-plt.legend()
-plt.show()
+# # Plot Loss Curve
+# plt.plot(loss_history, label="Training Loss")
+# plt.xlabel("Epochs")
+# plt.ylabel("Loss")
+# plt.title("Loss Curve Over Training")
+# plt.legend()
+# plt.show()
 
 # Save the models
 torch.save(model_time.state_dict(), "models/ODERNN_Time.pth")
