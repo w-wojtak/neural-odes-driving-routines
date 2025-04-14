@@ -233,7 +233,7 @@ model_drivers = ODERNN_Drivers(X_train.shape[1], 16, len(driver_labels))
 
 # Optimizer Setup
 optimizers = {
-    'time': torch.optim.AdamW(model_time.parameters(), lr=0.0005, weight_decay=1e-5),
+    'time': torch.optim.AdamW(model_time.parameters(), lr=0.001, weight_decay=1e-5),
     'power': torch.optim.Adam(model_power.parameters(), lr=0.01),
     'poi': torch.optim.Adam(model_poi.parameters(), lr=0.01),
     'drivers': torch.optim.Adam(model_drivers.parameters(), lr=0.01)
@@ -251,50 +251,51 @@ val_loss_history = []
 
 try:
     for epoch in range(epochs):
-        # Reset gradients
+        model_time.train()  # Training mode
+
         for optimizer in optimizers.values():
             optimizer.zero_grad()
 
-        # Train step
-        y_pred_time = model_time(X_train.unsqueeze(1), t_train).squeeze(1)
-        y_pred_time = y_pred_time.mean(dim=-1)  # Take the mean across the hidden dim
+        # --- Training ---
+        y_pred_time = model_time(X_train.unsqueeze(1), t_train).squeeze(1)  # shape: (635, hidden_dim)
+        y_pred_time = y_pred_time.mean(dim=-1)  # shape: (635,)
 
-        target_time = torch.tensor(train_df["TimeDay"].values, dtype=torch.float32)
-        loss_t = F.mse_loss(y_pred_time, target_time[:-1])  # Time prediction loss
+        # Slice target to match model output shape (635,)
+        target_time = t_train[:-1]
 
-        # Backpropagation
+        # print("y_pred_time[:5]:", y_pred_time[:5])
+        # print("target_time[:5]:", target_time[:5])
+
+        loss_t = F.mse_loss(y_pred_time, target_time)
+
         loss_t.backward()
-
-        # Gradient Clipping: clip gradients to avoid exploding gradients
         torch.nn.utils.clip_grad_norm_(model_time.parameters(), max_norm=1.0)
 
         for optimizer in optimizers.values():
             optimizer.step()
 
-        # Store training loss
         train_loss_history.append(loss_t.item())
 
-        # Validation step
+        # --- Validation ---
+        model_time.eval()
         with torch.no_grad():
-            model_time.eval()  # Switch to evaluation mode
             y_pred_time_val = model_time(X_val.unsqueeze(1), t_val).squeeze(1)
-            y_pred_time_val = y_pred_time_val.mean(dim=-1)  # Take the mean across the hidden dim
+            y_pred_time_val = y_pred_time_val.mean(dim=-1)
 
-            # Ensure the prediction and target sizes match
-            min_len = min(len(y_pred_time_val), len(t_val))  # Take the minimum length of both
-            y_pred_time_val = y_pred_time_val[:min_len]
-            t_val = t_val[:min_len]
+            # Slice validation targets too
+            target_time_val = t_val[:-1]
 
-            # Compute validation loss
-            loss_t_val = F.mse_loss(y_pred_time_val, t_val)
+            assert len(y_pred_time_val) == len(target_time_val), "Mismatch in val prediction and target lengths"
+
+            loss_t_val = F.mse_loss(y_pred_time_val, target_time_val)
             val_loss_history.append(loss_t_val.item())
 
-        # Print the loss at every 50th epoch
         if epoch % 50 == 0:
             print(f"Epoch [{epoch}/{epochs}], Train Loss: {loss_t.item():.4f}, Val Loss: {loss_t_val.item():.4f}")
 
 except Exception as e:
-    print("Error detected:", e)
+    print("Training error:", e)
+
 
     # Plot loss curves
     plt.figure(figsize=(10, 5))
